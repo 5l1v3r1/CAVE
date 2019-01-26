@@ -5,6 +5,11 @@ from collections import OrderedDict
 from pandas import DataFrame
 import numpy as np
 
+from bokeh.embed import components
+from bokeh.plotting import show
+from bokeh.io import output_notebook
+from bokeh.layouts import column, widgetbox
+
 from cave.analyzer.base_analyzer import BaseAnalyzer
 from cave.html.html_helpers import figure_to_html
 from cave.utils.helpers import get_config_origin
@@ -25,24 +30,31 @@ class OverviewTable(BaseAnalyzer):
         self.output_dir = output_dir
         self.runs = runs
 
-        self.html_table_general, self.html_table_specific = self.run()
+        self.bokeh_table = self.run()
 
     def run(self):
         """ Generate tables. """
         scenario = self.runs[0].scenario
 
         general_dict = self._general_dict(scenario)
-        html_table_general = DataFrame(data=OrderedDict([('General', general_dict)]))
-        html_table_general = html_table_general.reindex(list(general_dict.keys()))
-        html_table_general = html_table_general.to_html(escape=False, header=False, justify='left')
+        df_general = DataFrame(data=OrderedDict([('General', general_dict)])).reindex(list(general_dict.keys()))
+        df_general.reset_index(inplace=True)
+        df_general.rename({"index" : "Statistics"}, axis='columns', inplace=True)
+        # Alternative: html_table_general = df_general.to_html(escape=False, header=False, justify='left')
+        bokeh_general = array_to_bokeh_table(df_general, logger=self.logger, width={k : 200 if k == 'Statistics' else
+            150 for k in df_general.columns})
 
         runspec_dict = self._runspec_dict(self.runs)
         order_spec = list(list(runspec_dict.values())[0].keys())  # Get keys of any sub-dict for order
-        html_table_specific = DataFrame(runspec_dict)
-        html_table_specific = html_table_specific.reindex(order_spec)
-        html_table_specific = html_table_specific.to_html(escape=False, justify='left')
+        df_specific = DataFrame(runspec_dict).reindex(order_spec)
+        df_specific.reset_index(inplace=True)
+        df_specific.rename({"index" : "Statistics"}, axis='columns', inplace=True)
+        # Alternative: html_table_specific = df_specific.to_html(escape=False, justify='left')
+        bokeh_specific = array_to_bokeh_table(df_specific, logger=self.logger)
 
-        return html_table_general, html_table_specific
+        layout = column(bokeh_general, bokeh_specific)
+
+        return layout
 
     def _general_dict(self, scenario):
         """ Generate the meta-information that holds for all runs (scenario info etc) """
@@ -125,15 +137,10 @@ class OverviewTable(BaseAnalyzer):
 
     def get_html(self, d=None, tooltip=None, budget=None):
         if d is not None:
-            d["General"] = {"table" : self.html_table_general,
-                            "tooltip" : "General information about the optimization scenario."}
-            d["Run-Specific"] = {"table" : self.html_table_specific,
-                                 "tooltip" : "Information to specific runs (if there are multiple runs). Interesting "
-                                             "for parallel optimizations or usage of budgets/fidelities."}
+            d["bokeh"] = components(self.bokeh_table)
             d["tooltip"] = tooltip
-        return [self.html_table_general, self.html_table_specific]
 
     def get_jupyter(self):
-        from IPython.core.display import HTML, display
-        display(HTML(self.get_html()))
+        output_notebook()
+        show(self.bokeh_table)
 
