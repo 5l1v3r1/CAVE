@@ -107,13 +107,14 @@ class HpBandSter2SMAC(object):
         return cs, backup_cs
 
 
-    def _get_config(self, config_id, id2config, cs):
+    def _get_config(self, config_id, id2config, cs, budget):
         config = Configuration(cs, id2config[config_id]['config'])
         try:
             model_based_pick = id2config[config_id]['config_info']['model_based_pick']
-            config.origin = 'Model based pick' if model_based_pick else 'Random'
+            config.origin = '{}, budget: {}'.format('Model-based pick' if model_based_pick else 'Random', str(budget))
         except KeyError:
-            self.logger.debug("No origin for config!", exc_info=True)
+            config.origin = 'budget: {}'.format(str(budget))
+            self.logger.debug("No origin for config! Using budget (%s) as origin.", budget, exc_info=True)
         return config
 
     def hpbandster2smac(self, folder2result, cs: ConfigurationSpace, backup_cs, output_dir: str):
@@ -144,12 +145,12 @@ class HpBandSter2SMAC(object):
 
                 # Load config...
                 try:
-                    config = self._get_config(run.config_id, id2config_mapping, cs)
+                    config = self._get_config(run.config_id, id2config_mapping, cs, run.budget)
                 except ValueError as err:
                     self.logger.debug("Loading configuration failed... trying alternatives", exc_info=1)
                     for bcs in backup_cs:
                         try:
-                            config = self._get_config(run.config_id, id2config_mapping, bcs)
+                            config = self._get_config(run.config_id, id2config_mapping, bcs, run.budget)
                             cs = bcs
                             break
                         except ValueError:
@@ -225,7 +226,7 @@ class HpBandSter2SMAC(object):
                                                      traj_dict['times_finished'],
                                                      traj_dict['budgets'],
                                                      traj_dict['losses']):
-                incumbent = self._get_config(config_id, id2config_mapping, cs)
+                incumbent = self._get_config(config_id, id2config_mapping, cs, run.budget)
                 try:
                     incumbent_id = rh.config_ids[incumbent]
                 except KeyError as e:

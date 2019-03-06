@@ -223,26 +223,33 @@ class CostOverTime(BaseAnalyzer):
         return lines
 
     def _get_bohb_avg(self, validator, runs, rh):
-        if len(runs) > 1 and self.bohb_result:
-            # Add bohb-specific line
-            # Get collective rh
-            rh_bohb = RunHistory(average_cost)
-            for run in runs:
-                rh_bohb.update(run.combined_runhistory)
-            #self.logger.debug(rh_bohb.data)
-            # Get collective trajectory
-            traj = HpBandSter2SMAC().get_trajectory({'' : self.bohb_result}, '', self.scenario, rh_bohb)
-            #self.logger.debug(traj)
-            mean, time, configs = [], [], []
-            traj_dict = self.bohb_result.get_incumbent_trajectory()
+        """Find the incumbents over multiple runs and/or budgets. Starting on lowest budgets. Runs with a higher budget
+        are always set as new incumbent. This can lead to a higher cost, when switching to a higher budget.
+        """
+        def get_budget(entry):
+            budget = re.split('budget: ', entry['incumbent'].origin)
+            self.logger.debug("%s -> %s", budget, entry['incumbent'].origin)
+            return budget[1]
+        # TODO use new runsstructure here
+        old_traj = sorted(itertools.chain([run.trajectory for run in runs], key=lambda x: x['wallclock_time']))
+        new_traj = [old_traj[0]]
+        for entry in old_traj[1:]:
+            if (get_budget(entry) > get_budget(new_traj[-1])  #  lower budget never considered
+                or (get_budget(entry) == get_budget(new_traj[-1])
+                    and entry['cost'] < current_cost)):       # higher budget always "better" incumbent
+                new_traj.append(entry)
+        self.logger.debug("Old traj has %d entries, new one has %d", len(old_traj), len(new_traj))
 
-            mean, _, time, configs = self._get_mean_var_time(validator, traj, False, rh_bohb)
+        mean, time, configs = [], [], []
+        traj_dict = self.bohb_result.get_incumbent_trajectory()
 
-            configs, time, budget, mean = traj_dict['config_ids'],  traj_dict['times_finished'], traj_dict['budgets'], traj_dict['losses']
-            time_double = [t for sub in zip(time, time) for t in sub][1:]
-            mean_double = [t for sub in zip(mean, mean) for t in sub][:-1]
-            configs_double = [c for sub in zip(configs, configs) for c in sub][:-1]
-            return Line('all_budgets', time_double, mean_double, mean_double, mean_double, configs_double)
+        mean, _, time, configs = self._get_mean_var_time(validator, traj, False, rh_bohb)
+
+        configs, time, budget, mean = traj_dict['config_ids'],  traj_dict['times_finished'], traj_dict['budgets'], traj_dict['losses']
+        time_double = [t for sub in zip(time, time) for t in sub][1:]
+        mean_double = [t for sub in zip(mean, mean) for t in sub][:-1]
+        configs_double = [c for sub in zip(configs, configs) for c in sub][:-1]
+        return Line('all_budgets', time_double, mean_double, mean_double, mean_double, configs_double)
 
     def plot(self):
         """
